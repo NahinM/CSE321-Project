@@ -5,22 +5,22 @@ int is_bit_set(unsigned char *bitmap, int index) { return bitmap[index / 8] & (1
 long inode_offset(int inode_number) { return ((long)INODE_TABLE_BLOCK * BLOCK_SIZE) + ((long)(inode_number - 1) * sizeof(inode_t)); }
 int data_bitmap_index(int absolute_block_number) { return absolute_block_number - DATA_REGION_BLOCK; }
 
-/* TODO 1: Search bitmap indexes 1..31 and return INODE NUMBER. */
 int find_free_inode(unsigned char *bitmap)
 {
+    /* TODO 1: Search bitmap indexes 1..31 and return INODE NUMBER. */
     /* TODO: STUDENT CODE START */
-    for (int i = 1; i < TOTAL_INODES; i++) {   // index 0 is root inode
+    for (int i = 1; i < TOTAL_INODES; i++) {  // i is bitmap index, inode = i+1
         if (!is_bit_set(bitmap, i)) {
-            return i + 1;   // inode number = index + 1
+            return i + 1;   // inode number
         }
     }
     /* TODO: STUDENT CODE END */
     return -1;
 }
 
-/* TODO 2: First-fit search; return ABSOLUTE data block number. */
 int find_free_data_block(unsigned char *bitmap)
 {
+    /* TODO 2: First-fit search; return ABSOLUTE data block number. */
     /* TODO: STUDENT CODE START */
     for (int i = 0; i < DATA_BLOCKS; i++) {
         if (!is_bit_set(bitmap, i)) {
@@ -31,35 +31,35 @@ int find_free_data_block(unsigned char *bitmap)
     return -1;
 }
 
-/* TODO 3: Search root directory entries for filename. */
 int filename_exists(FILE *image, const char *filename)
 {
     dirent_t entry;
+    /* TODO 3: Search root directory entries for filename. */
     /* TODO: STUDENT CODE START */
     fseek(image, ROOT_DATA_BLOCK * BLOCK_SIZE, SEEK_SET);
-    int total_entries = BLOCK_SIZE / DIRENT_SIZE;
-    for (int i = 0; i < total_entries; i++) {
-        if (fread(&entry, DIRENT_SIZE, 1, image) != 1)
-            break;
+    for (int i = 0; i < 64; i++) {   // total entries in root directory block
+        if (fread(&entry, sizeof(entry), 1, image) != 1) {
+            break;   // error reading
+        }
         if (entry.inode_no != 0 && strcmp(entry.name, filename) == 0) {
-            return 1;
+            return 1;   // found
         }
     }
     /* TODO: STUDENT CODE END */
     return 0;
 }
 
-/* TODO 4: Search entries 2..63; free entry has inode_no == 0. */
 int find_free_directory_entry(FILE *image)
 {
     dirent_t entry;
+    /* TODO 4: Search entries 2..63; free entry has inode_no == 0. */
     /* TODO: STUDENT CODE START */
     fseek(image, ROOT_DATA_BLOCK * BLOCK_SIZE, SEEK_SET);
-    int total_entries = BLOCK_SIZE / DIRENT_SIZE;
-    for (int i = 2; i < total_entries; i++) {   // skip '.' and '..'
-        if (fread(&entry, DIRENT_SIZE, 1, image) != 1)
+    for (int i = 0; i < 64; i++) {
+        if (fread(&entry, sizeof(entry), 1, image) != 1) {
             break;
-        if (entry.inode_no == 0) {
+        }
+        if (i >= 2 && entry.inode_no == 0) {
             return i;
         }
     }
@@ -80,86 +80,34 @@ int main(int argc, char *argv[])
     int allocated_blocks[MAX_DIRECT_BLOCKS] = {0};
     int directory_entry_index;
 
-    if (argc != 5) {
-        printf("Usage: %s --input <image> --file <file>\n", argv[0]);
-        return 1;
-    }
-    if (strcmp(argv[1], "--input") != 0 || strcmp(argv[3], "--file") != 0) {
-        printf("Error: invalid command-line arguments.\n");
-        return 1;
-    }
-    image_name = argv[2];
-    source_name = argv[4];
+    if (argc != 5) { printf("Usage: %s --input <image> --file <file>\n", argv[0]); return 1; }
+    if (strcmp(argv[1], "--input") != 0 || strcmp(argv[3], "--file") != 0) { printf("Error: invalid command-line arguments.\n"); return 1; }
+    image_name = argv[2]; source_name = argv[4];
 
-    /* Open image */
     image = fopen(image_name, "rb+");
-    if (!image) {
-        printf("Error: file-system image not found.\n");
-        return 1;
-    }
+    if (!image) { printf("Error: file-system image not found.\n"); return 1; }
     fseek(image, SUPERBLOCK_BLOCK * BLOCK_SIZE, SEEK_SET);
-    if (fread(&sb, sizeof(sb), 1, image) != 1) {
-        printf("Error: could not read superblock.\n");
-        fclose(image);
-        return 1;
-    }
-    if (sb.magic != MAGIC_NUMBER) {
-        printf("Error: invalid SimpleFS image.\n");
-        fclose(image);
-        return 1;
-    }
+    if (fread(&sb, sizeof(sb), 1, image) != 1) { printf("Error: could not read superblock.\n"); fclose(image); return 1; }
+    if (sb.magic != MAGIC_NUMBER) { printf("Error: invalid SimpleFS image.\n"); fclose(image); return 1; }
 
-    /* Open source file */
     source = fopen(source_name, "rb");
-    if (!source) {
-        printf("Error: source file not found.\n");
-        fclose(image);
-        return 1;
-    }
-    fseek(source, 0, SEEK_END);
-    file_size = ftell(source);
-    rewind(source);
-    if (file_size < 0) {
-        printf("Error: could not determine source file size.\n");
-        fclose(source);
-        fclose(image);
-        return 1;
-    }
-    if (file_size > MAX_FILE_SIZE) {
-        printf("Error: file is too large for SimpleFS.\n");
-        fclose(source);
-        fclose(image);
-        return 1;
-    }
+    if (!source) { printf("Error: source file not found.\n"); fclose(image); return 1; }
+    fseek(source, 0, SEEK_END); file_size = ftell(source); rewind(source);
+    if (file_size < 0) { printf("Error: could not determine source file size.\n"); fclose(source); fclose(image); return 1; }
+    if (file_size > MAX_FILE_SIZE) { printf("Error: file is too large for SimpleFS.\n"); fclose(source); fclose(image); return 1; }
 
     /* TODO 5: Calculate required_blocks. Zero-byte file uses zero blocks. */
     /* TODO: STUDENT CODE START */
-    if (file_size == 0)
-        required_blocks = 0;
-    else
-        required_blocks = (file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    required_blocks = (file_size == 0) ? 0 : (int)((file_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
     /* TODO: STUDENT CODE END */
 
-    /* Check duplicate file name */
-    if (filename_exists(image, source_name)) {
-        printf("Error: file already exists in SimpleFS.\n");
-        fclose(source);
-        fclose(image);
-        return 1;
-    }
+    if (filename_exists(image, source_name)) { printf("Error: file already exists in SimpleFS.\n"); fclose(source); fclose(image); return 1; }
 
-    /* Read inode bitmap */
     fseek(image, INODE_BITMAP_BLOCK * BLOCK_SIZE, SEEK_SET);
     fread(inode_bitmap, BLOCK_SIZE, 1, image);
     free_inode = find_free_inode(inode_bitmap);
-    if (free_inode == -1) {
-        printf("Error: no free inode available.\n");
-        fclose(source);
-        fclose(image);
-        return 1;
-    }
+    if (free_inode == -1) { printf("Error: no free inode available.\n"); fclose(source); fclose(image); return 1; }
 
-    /* Read data bitmap */
     fseek(image, DATA_BITMAP_BLOCK * BLOCK_SIZE, SEEK_SET);
     fread(data_bitmap, BLOCK_SIZE, 1, image);
 
@@ -169,48 +117,33 @@ int main(int argc, char *argv[])
         int block = find_free_data_block(data_bitmap);
         if (block == -1) {
             printf("Error: insufficient free data blocks.\n");
-            fclose(source);
-            fclose(image);
+            fclose(source); fclose(image);
             return 1;
         }
         allocated_blocks[i] = block;
-        // Mark allocated in the in-memory bitmap
-        int index = data_bitmap_index(block);
-        set_bit(data_bitmap, index);
+        // Mark as allocated in the in-memory bitmap
+        set_bit(data_bitmap, data_bitmap_index(block));
     }
     /* TODO: STUDENT CODE END */
 
-    /* Find free directory entry */
     directory_entry_index = find_free_directory_entry(image);
-    if (directory_entry_index == -1) {
-        printf("Error: root directory is full.\n");
-        fclose(source);
-        fclose(image);
-        return 1;
-    }
+    if (directory_entry_index == -1) { printf("Error: root directory is full.\n"); fclose(source); fclose(image); return 1; }
 
     /* TODO 7: Copy source contents into allocated blocks using zero-filled buffers. */
     /* TODO: STUDENT CODE START */
     unsigned char buffer[BLOCK_SIZE];
     for (int i = 0; i < required_blocks; i++) {
+        // Clear buffer
         memset(buffer, 0, BLOCK_SIZE);
-        size_t bytes_to_read = (i == required_blocks - 1) ?
-                               (file_size - i * BLOCK_SIZE) : BLOCK_SIZE;
-        size_t read_bytes = fread(buffer, 1, bytes_to_read, source);
-        if (read_bytes != bytes_to_read && !feof(source)) {
-            printf("Error: reading source file.\n");
-            fclose(source);
-            fclose(image);
-            return 1;
+        // Read from source, up to BLOCK_SIZE bytes
+        size_t bytes_read = fread(buffer, 1, BLOCK_SIZE, source);
+        if (bytes_read == 0 && i == 0) {
+            // zero-byte file: we still write nothing, but we may skip writing blocks
+            // However, if file size is 0, required_blocks = 0, loop won't run.
         }
-        // Write the full block (including zeros for unused tail)
+        // Write to the image at the absolute block
         fseek(image, (long)allocated_blocks[i] * BLOCK_SIZE, SEEK_SET);
-        if (fwrite(buffer, 1, BLOCK_SIZE, image) != BLOCK_SIZE) {
-            printf("Error: writing data to image.\n");
-            fclose(source);
-            fclose(image);
-            return 1;
-        }
+        fwrite(buffer, 1, BLOCK_SIZE, image);
     }
     /* TODO: STUDENT CODE END */
 
@@ -219,17 +152,22 @@ int main(int argc, char *argv[])
     /* TODO: STUDENT CODE START */
     new_inode.type = TYPE_FILE;
     new_inode.links = 1;
-    new_inode.size = file_size;
+    new_inode.size = (uint32_t)file_size;
     for (int i = 0; i < MAX_DIRECT_BLOCKS; i++) {
-        new_inode.direct[i] = (i < required_blocks) ? allocated_blocks[i] : 0;
+        if (i < required_blocks) {
+            new_inode.direct[i] = allocated_blocks[i];
+        } else {
+            new_inode.direct[i] = 0;
+        }
     }
+    // reserved already zero
     /* TODO: STUDENT CODE END */
     fseek(image, inode_offset(free_inode), SEEK_SET);
     fwrite(&new_inode, sizeof(new_inode), 1, image);
 
     /* TODO 9: Mark allocated inode in inode bitmap. */
     /* TODO: STUDENT CODE START */
-    set_bit(inode_bitmap, free_inode - 1);   // index = inode number - 1
+    set_bit(inode_bitmap, free_inode - 1);   // bitmap index = inode number - 1
     /* TODO: STUDENT CODE END */
     fseek(image, INODE_BITMAP_BLOCK * BLOCK_SIZE, SEEK_SET);
     fwrite(inode_bitmap, BLOCK_SIZE, 1, image);
@@ -241,6 +179,7 @@ int main(int argc, char *argv[])
     /* TODO: STUDENT CODE START */
     new_entry.inode_no = free_inode;
     new_entry.type = TYPE_FILE;
+    // Copy name, ensuring null termination and max length 58 (since name[59])
     strncpy(new_entry.name, source_name, 58);
     new_entry.name[58] = '\0';   // ensure null termination
     /* TODO: STUDENT CODE END */
@@ -250,19 +189,17 @@ int main(int argc, char *argv[])
         fwrite(&new_entry, sizeof(new_entry), 1, image);
     }
 
-    /* Read root inode to update its size */
     fseek(image, inode_offset(ROOT_INODE), SEEK_SET);
     fread(&root_inode, sizeof(root_inode), 1, image);
 
     /* TODO 11: Increase root_inode.size by sizeof(dirent_t). */
     /* TODO: STUDENT CODE START */
-    root_inode.size += DIRENT_SIZE;   // 64 bytes
+    root_inode.size += sizeof(dirent_t);   // 64 bytes
     /* TODO: STUDENT CODE END */
     fseek(image, inode_offset(ROOT_INODE), SEEK_SET);
     fwrite(&root_inode, sizeof(root_inode), 1, image);
 
-    fclose(source);
-    fclose(image);
+    fclose(source); fclose(image);
     printf("%s added successfully to %s\n", source_name, image_name);
     return 0;
 }
